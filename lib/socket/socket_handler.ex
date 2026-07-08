@@ -42,62 +42,70 @@ defmodule Lanyard.SocketHandler do
       {:ok, json} when is_map(json) ->
         case json["op"] do
           2 ->
-            if json["d"] == nil || !is_map(json["d"]) || map_size(json["d"]) == 0 do
-              {:stop, :normal, {4005, "requires_data_object"}, state}
-            else
-              init_state =
-                case json["d"] do
-                  %{"subscribe_to_ids" => ids} ->
-                    Logger.debug(
-                      "Sockets | Socket initialized and subscribed to list: #{inspect(ids)}"
-                    )
-
-                    Presence.subscribe_to_ids_and_build(ids)
-
-                  %{"subscribe_to_id" => id} ->
-                    case GenRegistry.lookup(Lanyard.Presence, id) do
-                      {:ok, pid} ->
-                        {:ok, raw_data} = Presence.get_presence(id)
-                        {_, presence} = Presence.build_pretty_presence(raw_data)
-
-                        send(pid, {:add_subscriber, self()})
-
-                        Logger.debug(
-                          "Sockets | Socket initialized and subscribed to singleton: #{id}"
-                        )
-
-                        presence
-
-                      _ ->
-                        %{}
-                    end
-
-                  %{"subscribe_to_all" => true} ->
-                    ids =
-                      GenRegistry.reduce(Lanyard.Presence, [], fn {id, _pid}, acc ->
-                        [id | acc]
-                      end)
-
-                    :ets.insert(
-                      :global_subscribers,
-                      {"subscribers", [self() | get_global_subscriber_list()]}
-                    )
-
-                    Process.flag(:trap_exit, true)
-
-                    Presence.subscribe_to_ids_and_build(ids)
-
-                  _ ->
-                    nil
-                end
-
-              if init_state == nil do
+            cond do
+              !state.awaiting_init ->
                 {:stop, :normal, {4006, "invalid_payload"}, state}
-              else
-                {:reply, :ok,
-                 construct_socket_msg(state.compression, %{op: 0, t: "INIT_STATE", d: init_state}),
-                 state}
-              end
+
+              json["d"] == nil || !is_map(json["d"]) || map_size(json["d"]) == 0 ->
+                {:stop, :normal, {4005, "requires_data_object"}, state}
+
+              true ->
+                init_state =
+                  case json["d"] do
+                    %{"subscribe_to_ids" => ids} ->
+                      Logger.debug(
+                        "Sockets | Socket initialized and subscribed to list: #{inspect(ids)}"
+                      )
+
+                      Presence.subscribe_to_ids_and_build(ids)
+
+                    %{"subscribe_to_id" => id} ->
+                      case GenRegistry.lookup(Lanyard.Presence, id) do
+                        {:ok, pid} ->
+                          {:ok, raw_data} = Presence.get_presence(id)
+                          {_, presence} = Presence.build_pretty_presence(raw_data)
+
+                          send(pid, {:add_subscriber, self()})
+
+                          Logger.debug(
+                            "Sockets | Socket initialized and subscribed to singleton: #{id}"
+                          )
+
+                          presence
+
+                        _ ->
+                          %{}
+                      end
+
+                    %{"subscribe_to_all" => true} ->
+                      ids =
+                        GenRegistry.reduce(Lanyard.Presence, [], fn {id, _pid}, acc ->
+                          [id | acc]
+                        end)
+
+                      :ets.insert(
+                        :global_subscribers,
+                        {"subscribers", [self() | get_global_subscriber_list()]}
+                      )
+
+                      Process.flag(:trap_exit, true)
+
+                      Presence.subscribe_to_ids_and_build(ids)
+
+                    _ ->
+                      nil
+                  end
+
+                if init_state == nil do
+                  {:stop, :normal, {4006, "invalid_payload"}, state}
+                else
+                  {:reply, :ok,
+                   construct_socket_msg(state.compression, %{
+                     op: 0,
+                     t: "INIT_STATE",
+                     d: init_state
+                   }), %{state | awaiting_init: false}}
+                end
             end
 
           # Used for heartbeating
