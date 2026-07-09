@@ -169,13 +169,13 @@ defmodule Lanyard.Gateway.Client do
        }}
     )
 
-    {:close, "Reconnecting for resume", state}
+    exit({:shutdown, "Reconnecting for resume"})
   end
 
-  defp _handle_data(%{op: :invalid_session} = _data, state) do
+  defp _handle_data(%{op: :invalid_session} = _data, _state) do
     Logger.warning("Discord: Invalid session, starting new session")
     send(:discord_bot, :clear_resume)
-    {:close, "Invalid session, starting new session", state}
+    exit({:shutdown, "Invalid session, starting new session"})
   end
 
   def websocket_info(:start, _connection, state) do
@@ -220,12 +220,14 @@ defmodule Lanyard.Gateway.Client do
        }}
     )
 
-    {:close, "Heartbeat stale", state}
+    exit({:shutdown, "Heartbeat stale"})
   end
 
   @spec websocket_terminate(any(), any(), nil | keyword() | map()) :: :ok
   def websocket_terminate(reason, _conn_state, state) do
-    Logger.info("Discord: Websocket closed in state #{inspect(state)} with reason #{inspect(reason)}")
+    Logger.info(
+      "Discord: Websocket closed in state #{inspect(state)} with reason #{inspect(reason)}"
+    )
 
     :ok
   end
